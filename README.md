@@ -23,8 +23,18 @@ In order to improve file reading speed, we process the raw data to generate corr
 
 ## Running the Code
 
-```
+`--market`: nasdaq, sp500, csi300, csi500, acl18, sz_50
+
+Choose the specific parameter set for different markets
+
+| Dataset | `data_path` | `stock_num` | `lookback_length` | `valid_index` | `test_index` | `fea_num` | 
+| ------- | ----------- | ----------- | ----------------- | ------------- | ------------ | --------- |
+| csi300  | `dataset`   |  482        |  20               | 2979          | 3038         | 5         |
+| csi500  | `dataset`   |  500        |  20               | 2979          | 3038         | 5         |
+| acl18   | `dataset`   |  84         |  25               | 752           | 1005         | 11        |
+| sz_50   | `dataset`   |  26         |  25               | 2760          | 3970         | 10        |
+
+```bash
 # edit configurations in train.py
 python src/train.py
 ```
-

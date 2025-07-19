@@ -54,7 +54,7 @@ if market_name == "SP500":
             gt_data[ticket][row] = (data[ticket][row][-1] - data[ticket][row - steps][-1]) / data[ticket][row - steps][
                 -1
             ]
-else:
+elif market_name == "nasdaq":
     with open(os.path.join(dataset_path, "eod_data.pkl"), "rb") as f:
         eod_data = pickle.load(f)
     with open(os.path.join(dataset_path, "mask_data.pkl"), "rb") as f:
@@ -63,6 +63,29 @@ else:
         gt_data = pickle.load(f)
     with open(os.path.join(dataset_path, "price_data.pkl"), "rb") as f:
         price_data = pickle.load(f)
+
+else:
+    data = np.load(f"{dataset_path}/{market_name}.npy")
+    if "csi" in market_name:
+        price_data = data[:, :, -2]
+    elif market_name == "acl18":
+        price_data = data[:, :, 4]
+    else:
+        price_data = data[:, :, 3]
+
+    mask_data = np.ones((data.shape[0], data.shape[1]))
+    eod_data = data
+    gt_data = np.zeros((data.shape[0], data.shape[1]))
+    for ticket in range(0, data.shape[0]):
+        for row in range(1, data.shape[1]):
+            if market_name == "acl18":
+                gt_data[ticket][row] = (data[ticket][row][4] - data[ticket][row - steps][4]) / data[ticket][
+                    row - steps
+                ][4]
+            else:
+                gt_data[ticket][row] = (data[ticket][row][3] - data[ticket][row - steps][3]) / data[ticket][
+                    row - steps
+                ][3]
 
 trade_dates = mask_data.shape[1]
 model = StockMixer(
