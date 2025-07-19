@@ -1,4 +1,8 @@
 __pycache__/
 .venv/
 .vscode/
-
+*.csv
+dataset/csi300
+dataset/csi500
+dataset/acl18
+dataset/sz_50
