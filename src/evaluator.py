@@ -3,10 +3,11 @@ import pandas as pd
 
 
 def evaluate(prediction, ground_truth, mask, report=False):
-    assert ground_truth.shape == prediction.shape, 'shape mis-match'
+    assert ground_truth.shape == prediction.shape, "shape mis-match"
     performance = {}
     # mse
-    performance['mse'] = np.linalg.norm((prediction - ground_truth) * mask) ** 2 / np.sum(mask)
+    performance["mse"] = np.linalg.norm(
+        (prediction - ground_truth) * mask) ** 2 / np.sum(mask)
     # IC
     df_pred = pd.DataFrame(prediction * mask)
     df_gt = pd.DataFrame(ground_truth * mask)
@@ -17,8 +18,10 @@ def evaluate(prediction, ground_truth, mask, report=False):
     bt_long = 1.0
     bt_long5 = 1.0
     bt_long10 = 1.0
+    bt_long_series, bt_long5_series, bt_long10_series = [], [], []
     irr = 0.0
     sharpe_li5 = []
+    sharpe_short5 = []
     prec_10 = []
 
     for i in range(prediction.shape[1]):
@@ -29,32 +32,42 @@ def evaluate(prediction, ground_truth, mask, report=False):
         gt_top1 = set()
         gt_top5 = set()
         gt_top10 = set()
+        gt_bottom5 = set()
 
         for j in range(1, prediction.shape[0] + 1):
-            cur_rank = rank_gt[-1 * j]
-            if mask[cur_rank][i] < 0.5:
+            cur_top_rank = rank_gt[-1 * j]
+            cur_bottom_rank = rank_gt[j - 1]
+
+            if mask[cur_top_rank][i] < 0.5:
                 continue
             if len(gt_top1) < 1:
-                gt_top1.add(cur_rank)
+                gt_top1.add(cur_top_rank)
             if len(gt_top5) < 5:
-                gt_top5.add(cur_rank)
+                gt_top5.add(cur_top_rank)
+            if len(gt_bottom5) < 5:
+                gt_bottom5.add(cur_bottom_rank)
             if len(gt_top10) < 10:
-                gt_top10.add(cur_rank)
+                gt_top10.add(cur_top_rank)
 
         rank_pre = np.argsort(prediction[:, i])
         pre_top1 = set()
         pre_top5 = set()
         pre_top10 = set()
+        pre_bottom5 = set()
         for j in range(1, prediction.shape[0] + 1):
-            cur_rank = rank_pre[-1 * j]
-            if mask[cur_rank][i] < 0.5:
+            cur_top_rank = rank_pre[-1 * j]
+            cur_bottom_rank = rank_pre[j - 1]
+
+            if mask[cur_top_rank][i] < 0.5:
                 continue
             if len(pre_top1) < 1:
-                pre_top1.add(cur_rank)
+                pre_top1.add(cur_top_rank)
             if len(pre_top5) < 5:
-                pre_top5.add(cur_rank)
+                pre_top5.add(cur_top_rank)
+            if len(pre_bottom5) < 5:
+                pre_bottom5.add(cur_bottom_rank)
             if len(pre_top10) < 10:
-                pre_top10.add(cur_rank)
+                pre_top10.add(cur_top_rank)
 
         top1_pos_in_gt = 0
         for j in range(1, prediction.shape[0] + 1):
@@ -72,6 +85,7 @@ def evaluate(prediction, ground_truth, mask, report=False):
 
         real_ret_rat_top = ground_truth[list(pre_top1)[0]][i]
         bt_long += real_ret_rat_top
+        bt_long_series.append(real_ret_rat_top)
         gt_irr = 0.0
 
         for gt in gt_top10:
@@ -83,23 +97,44 @@ def evaluate(prediction, ground_truth, mask, report=False):
         irr += real_ret_rat_top5
         real_ret_rat_top5 /= 5
         bt_long5 += real_ret_rat_top5
+        bt_long5_series.append(real_ret_rat_top5)
+
+        real_ret_rat_bottom5 = 0
+
+        for pre in pre_bottom5:
+            real_ret_rat_bottom5 += ground_truth[pre][i]
+        real_ret_rat_bottom5 /= 5
+        real_ret_rat_bottom5 *= -1
 
         prec = 0.0
         real_ret_rat_top10 = 0
         for pre in pre_top10:
             real_ret_rat_top10 += ground_truth[pre][i]
-            prec += (ground_truth[pre][i] >= 0)
+            prec += ground_truth[pre][i] >= 0
         prec_10.append(prec / 10)
         real_ret_rat_top10 /= 10
         bt_long10 += real_ret_rat_top10
+        bt_long10_series.append(real_ret_rat_top10)
         sharpe_li5.append(real_ret_rat_top5)
+        sharpe_short5.append(real_ret_rat_bottom5)
 
-    performance['IC'] = np.mean(ic)
-    performance['RIC'] = np.mean(ic) / np.std(ic)
+    hedge_sharpe5 = (np.array(sharpe_li5) + np.array(sharpe_short5)) / 2
+    performance["IC"] = np.mean(ic)
+    performance["RIC"] = np.mean(ic) / np.std(ic)
     sharpe_li5 = np.array(sharpe_li5)
-    performance['sharpe5'] = (np.mean(sharpe_li5)/np.std(sharpe_li5))*15.87
-    performance['prec_10'] = np.mean(prec_10)
+    performance["Long sharpe5"] = (
+        np.mean(sharpe_li5) / np.std(sharpe_li5)) * 15.87
+    performance["Long Annual Return"] = sharpe_li5.mean() * 252
+    performance["Long MDD"] = np.max(np.maximum.accumulate(
+        sharpe_li5.cumsum()) - sharpe_li5.cumsum())
+    performance["Long Calmar Ratio"] = performance["Long Annual Return"] / \
+        performance["Long MDD"]
+    performance["Hedge sharpe5"] = (
+        np.mean(hedge_sharpe5) / np.std(hedge_sharpe5)) * 15.87
+    performance["Hedge Annual Return"] = hedge_sharpe5.mean() * 252
+    performance["Hedge MDD"] = np.max(np.maximum.accumulate(
+        hedge_sharpe5.cumsum()) - hedge_sharpe5.cumsum())
+    performance["Hedge Calmar"] = performance["Hedge Annual Return"] / \
+        performance["Hedge MDD"]
+
     return performance
-
-
-

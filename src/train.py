@@ -1,36 +1,49 @@
-import random
-import numpy as np
 import os
-import torch as torch
-from load_data import load_EOD_data
-from evaluator import evaluate
-from model import get_loss, StockMixer
 import pickle
+import random
+from argparse import ArgumentParser, Namespace
+
+import numpy as np
+import torch as torch
+from evaluator import evaluate
+from model import StockMixer, get_loss
+
+
+def get_args() -> Namespace:
+    parser = ArgumentParser()
+    parser.add_argument("--market", type=str, default="SP500")
+    parser.add_argument("--market_num", type=int, default=20)
+    parser.add_argument("--scale_factor", type=int, default=3)
+    parser.add_argument("--inference", action="store_true")
+
+    return parser.parse_args()
+
+
+args = get_args()
 
 
 np.random.seed(123456789)
 torch.random.manual_seed(12345678)
-device = torch.device("cuda") if torch.cuda.is_available() else 'cpu'
-
-data_path = '../dataset'
-market_name = 'NASDAQ'
-relation_name = 'wikidata'
-stock_num = 1026
+device = torch.device("cuda:2") if torch.cuda.is_available() else "cpu"
+data_path = f"../dataset/{args.market}"
+market_name = args.market
+relation_name = "wikidata"
+stock_num = 474 if args.market == "SP500" else 1026
 lookback_length = 16
 epochs = 100
-valid_index = 756
-test_index = 1008
+valid_index = 1006 if args.market == "SP500" else 756
+test_index = 1259 if args.market == "SP500" else 1008
 fea_num = 5
-market_num = 20
+market_num = args.market_num
 steps = 1
 learning_rate = 0.001
 alpha = 0.1
-scale_factor = 3
-activation = 'GELU'
+scale_factor = args.scale_factor
+activation = "GELU"
 
-dataset_path = '../dataset/' + market_name
+dataset_path = data_path
 if market_name == "SP500":
-    data = np.load('../dataset/SP500/SP500.npy')
+    data = np.load(f"{dataset_path}/SP500.npy")
     data = data[:, 915:, :]
     price_data = data[:, :, -1]
     mask_data = np.ones((data.shape[0], data.shape[1]))
@@ -38,8 +51,9 @@ if market_name == "SP500":
     gt_data = np.zeros((data.shape[0], data.shape[1]))
     for ticket in range(0, data.shape[0]):
         for row in range(1, data.shape[1]):
-            gt_data[ticket][row] = (data[ticket][row][-1] - data[ticket][row - steps][-1]) / \
-                                   data[ticket][row - steps][-1]
+            gt_data[ticket][row] = (data[ticket][row][-1] - data[ticket][row - steps][-1]) / data[ticket][row - steps][
+                -1
+            ]
 else:
     with open(os.path.join(dataset_path, "eod_data.pkl"), "rb") as f:
         eod_data = pickle.load(f)
@@ -52,11 +66,7 @@ else:
 
 trade_dates = mask_data.shape[1]
 model = StockMixer(
-    stocks=stock_num,
-    time_steps=lookback_length,
-    channels=fea_num,
-    market=market_num,
-    scale=scale_factor
+    stocks=stock_num, time_steps=lookback_length, channels=fea_num, market=market_num, scale=scale_factor
 ).to(device)
 
 optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
@@ -71,18 +81,17 @@ def validate(start_index, end_index):
         cur_valid_pred = np.zeros([stock_num, end_index - start_index], dtype=float)
         cur_valid_gt = np.zeros([stock_num, end_index - start_index], dtype=float)
         cur_valid_mask = np.zeros([stock_num, end_index - start_index], dtype=float)
-        loss = 0.
-        reg_loss = 0.
-        rank_loss = 0.
+        loss = 0.0
+        reg_loss = 0.0
+        rank_loss = 0.0
         for cur_offset in range(start_index - lookback_length - steps + 1, end_index - lookback_length - steps + 1):
             data_batch, mask_batch, price_batch, gt_batch = map(
-
-                lambda x: torch.Tensor(x).to(device),
-                get_batch(cur_offset)
+                lambda x: torch.Tensor(x).to(device), get_batch(cur_offset)
             )
             prediction = model(data_batch)
-            cur_loss, cur_reg_loss, cur_rank_loss, cur_rr = get_loss(prediction, gt_batch, price_batch, mask_batch,
-                                                                     stock_num, alpha)
+            cur_loss, cur_reg_loss, cur_rank_loss, cur_rr = get_loss(
+                prediction, gt_batch, price_batch, mask_batch, stock_num, alpha
+            )
             loss += cur_loss.item()
             reg_loss += cur_reg_loss.item()
             rank_loss += cur_rank_loss.item()
@@ -100,13 +109,14 @@ def get_batch(offset=None):
     if offset is None:
         offset = random.randrange(0, valid_index)
     seq_len = lookback_length
-    mask_batch = mask_data[:, offset: offset + seq_len + steps]
+    mask_batch = mask_data[:, offset : offset + seq_len + steps]
     mask_batch = np.min(mask_batch, axis=1)
     return (
-        eod_data[:, offset:offset + seq_len, :],
+        eod_data[:, offset : offset + seq_len, :],
         np.expand_dims(mask_batch, axis=1),
         np.expand_dims(price_data[:, offset + seq_len - 1], axis=1),
-        np.expand_dims(gt_data[:, offset + seq_len + steps - 1], axis=1))
+        np.expand_dims(gt_data[:, offset + seq_len + steps - 1], axis=1),
+    )
 
 
 for epoch in range(epochs):
@@ -115,39 +125,46 @@ for epoch in range(epochs):
     tra_loss = 0.0
     tra_reg_loss = 0.0
     tra_rank_loss = 0.0
-    for j in range(valid_index - lookback_length - steps + 1):
-        data_batch, mask_batch, price_batch, gt_batch = map(
-            lambda x: torch.Tensor(x).to(device),
-            get_batch(batch_offsets[j])
-        )
-        optimizer.zero_grad()
-        prediction = model(data_batch)
-        cur_loss, cur_reg_loss, cur_rank_loss, _ = get_loss(prediction, gt_batch, price_batch, mask_batch,
-                                                            stock_num, alpha)
-        cur_loss = cur_loss
-        cur_loss.backward()
-        optimizer.step()
 
-        tra_loss += cur_loss.item()
-        tra_reg_loss += cur_reg_loss.item()
-        tra_rank_loss += cur_rank_loss.item()
+    if args.inference:
+        model.load_state_dict(
+            torch.load(f"./stock_mixer_{args.market}_last_{args.market_num}_{args.scale_factor}.pt", weights_only=True)
+        )
+    else:
+        for j in range(valid_index - lookback_length - steps + 1):
+            data_batch, mask_batch, price_batch, gt_batch = map(
+                lambda x: torch.Tensor(x).to(device), get_batch(batch_offsets[j])
+            )
+            optimizer.zero_grad()
+            prediction = model(data_batch)
+            cur_loss, cur_reg_loss, cur_rank_loss, _ = get_loss(
+                prediction, gt_batch, price_batch, mask_batch, stock_num, alpha
+            )
+            cur_loss = cur_loss
+            cur_loss.backward()
+            optimizer.step()
+
+            tra_loss += cur_loss.item()
+            tra_reg_loss += cur_reg_loss.item()
+            tra_rank_loss += cur_rank_loss.item()
     tra_loss = tra_loss / (valid_index - lookback_length - steps + 1)
     tra_reg_loss = tra_reg_loss / (valid_index - lookback_length - steps + 1)
     tra_rank_loss = tra_rank_loss / (valid_index - lookback_length - steps + 1)
-    print('Train : loss:{:.2e}  =  {:.2e} + alpha*{:.2e}'.format(tra_loss, tra_reg_loss, tra_rank_loss))
+    print("Train : loss:{:.2e}  =  {:.2e} + alpha*{:.2e}".format(tra_loss, tra_reg_loss, tra_rank_loss))
 
     val_loss, val_reg_loss, val_rank_loss, val_perf = validate(valid_index, test_index)
-    print('Valid : loss:{:.2e}  =  {:.2e} + alpha*{:.2e}'.format(val_loss, val_reg_loss, val_rank_loss))
+    print("Valid : loss:{:.2e}  =  {:.2e} + alpha*{:.2e}".format(val_loss, val_reg_loss, val_rank_loss))
 
     test_loss, test_reg_loss, test_rank_loss, test_perf = validate(test_index, trade_dates)
-    print('Test: loss:{:.2e}  =  {:.2e} + alpha*{:.2e}'.format(test_loss, test_reg_loss, test_rank_loss))
+    print("Test: loss:{:.2e}  =  {:.2e} + alpha*{:.2e}".format(test_loss, test_reg_loss, test_rank_loss))
 
     if val_loss < best_valid_loss:
         best_valid_loss = val_loss
         best_valid_perf = val_perf
         best_test_perf = test_perf
 
-    print('Valid performance:\n', 'mse:{:.2e}, IC:{:.2e}, RIC:{:.2e}, prec@10:{:.2e}, SR:{:.2e}'.format(val_perf['mse'], val_perf['IC'],
-                                                     val_perf['RIC'], val_perf['prec_10'], val_perf['sharpe5']))
-    print('Test performance:\n', 'mse:{:.2e}, IC:{:.2e}, RIC:{:.2e}, prec@10:{:.2e}, SR:{:.2e}'.format(test_perf['mse'], test_perf['IC'],
-                                                                            test_perf['RIC'], test_perf['prec_10'], test_perf['sharpe5']), '\n\n')
+    print(f"Valid performance:\n {val_perf}")
+    print(f"Test performance:\n {test_perf} \n\n")
+
+if not args.inference:
+    torch.save(model.state_dict(), f"stock_mixer_{args.market}_last_{args.market_num}_{args.scale_factor}.pt")
